@@ -97,6 +97,9 @@
   .mini .cell{font-size:8.5px; border-radius:9px; cursor:default; padding:3px;}
   .mini .cell.marked{background:linear-gradient(180deg,var(--green) 0%, #1c8f6f 100%);}
   .mini .cell.free{color:var(--gold);}
+  .playerblock{padding-top:14px; margin-top:14px; border-top:1px solid var(--line);}
+  .playerblock:first-child{padding-top:2px; margin-top:0; border-top:none;}
+  .playerblock .meta{text-align:left;}
 
   .waiting{text-align:center; color:var(--muted); padding:34px 16px; font-size:14px; line-height:1.6;}
   .waiting .big{font-size:40px; margin-bottom:10px;}
@@ -157,7 +160,7 @@
     <div class="toolbar">
       <div class="seg">
         <button id="tabMine" class="active">My card</button>
-        <button id="tabTheirs">Their card<span id="theirBadge" class="badge hidden">!</span></button>
+        <button id="tabTheirs">Players<span id="theirBadge" class="badge hidden">!</span></button>
       </div>
     </div>
 
@@ -175,19 +178,18 @@
       <div class="meta">Tap a square when you see it happen. First to a full line — across, down, or diagonal — wins.</div>
     </div>
 
-    <!-- THEIR CARD -->
+    <!-- OTHER PLAYERS -->
     <div id="viewTheirs" class="panel hidden">
       <div class="pline">
-        <div class="pname"><span>📺</span><span class="who" id="theirName">Your partner</span></div>
-        <div class="pill" id="theirPill">waiting…</div>
+        <div class="pname"><span>📺</span><span class="who">Other players</span></div>
+        <div class="pill" id="othersCount">nobody yet</div>
       </div>
-      <div id="theirGrid" class="grid mini"></div>
+      <div id="othersList"></div>
       <div id="theirWaiting" class="waiting">
         <div class="big">📡</div>
-        Waiting for your partner to join room <code id="roomEcho">—</code>.<br>
-        Make sure they typed the <b>exact same</b> room code.
+        Waiting for others to join room <code id="roomEcho">—</code>.<br>
+        They just need to open the <b>same link</b> and type the <b>exact same</b> room code.
       </div>
-      <div class="meta" id="theirUpdated"></div>
     </div>
   </section>
 
@@ -259,8 +261,8 @@ function suggestRoom(){
 
 /* ---------- state ---------- */
 let ROOM="", NAME="", CARD=[], MARKS=[], myBingo=false;
-let partner=null;               // {name, card, marks, bingo, t}
-let partnerSeenBingo=false;
+let players={};                 // id -> {name, card, marks, bingo, t}
+let seenBingo={};               // id -> bool (already toasted this bingo)
 let pollTimer=null, lastId=null, pollActive=false, wsReady=false, pubTimer=null, heartbeat=null, reconnectT=null;
 
 /* ---------- card building ---------- */
@@ -315,35 +317,59 @@ function renderMine(){
   const wasBingo=myBingo; myBingo=lines>0;
   if(myBingo && !wasBingo){ celebrate(true); }
 }
-function renderTheirs(){
-  const grid=document.getElementById("theirGrid");
+function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+function renderOthers(){
+  const list=document.getElementById("othersList");
   const waiting=document.getElementById("theirWaiting");
-  const upd=document.getElementById("theirUpdated");
-  if(!partner || !partner.card){
-    grid.classList.add("hidden"); waiting.classList.remove("hidden"); upd.textContent="";
-    document.getElementById("theirName").textContent="Your partner";
-    document.getElementById("theirPill").textContent="waiting…";
-    document.getElementById("theirPill").className="pill";
+  const count=document.getElementById("othersCount");
+  const badge=document.getElementById("theirBadge");
+  const now=Date.now();
+  // drop players we haven't heard from in ~50s (they closed the game)
+  for(const id in players){ if(now-players[id].t>50000){ delete players[id]; delete seenBingo[id]; } }
+  const ids=Object.keys(players).sort((a,b)=>(players[a].name||"").localeCompare(players[b].name||""));
+  // tab badge
+  if(ids.length){ badge.textContent=ids.length; if(document.getElementById("viewTheirs").classList.contains("hidden")) badge.classList.remove("hidden"); }
+  else { badge.classList.add("hidden"); }
+  if(!ids.length){
+    list.innerHTML=""; waiting.classList.remove("hidden");
+    count.textContent="nobody yet"; count.className="pill";
     return;
   }
-  grid.classList.remove("hidden"); waiting.classList.add("hidden");
-  document.getElementById("theirName").textContent = partner.name || "Your partner";
-  const {lines,cells}=winningCells(partner.marks);
-  grid.innerHTML="";
-  for(let i=0;i<25;i++){
-    const d=document.createElement("div");
-    const free=(i===12);
-    d.className="cell"+(partner.marks[i]?" marked":"")+(free?" free":"")+(cells.has(i)?" win":"");
-    d.innerHTML="<span>"+partner.card[i]+"</span>";
-    grid.appendChild(d);
+  waiting.classList.add("hidden");
+  count.textContent = ids.length+(ids.length===1?" player":" players");
+  count.className="pill";
+  list.innerHTML="";
+  for(const id of ids){
+    const p=players[id];
+    if(!Array.isArray(p.card)||!Array.isArray(p.marks)) continue;
+    const {lines,cells}=winningCells(p.marks);
+    const block=document.createElement("div");
+    block.className="playerblock";
+    const secs=Math.max(0,Math.round((now-p.t)/1000));
+    const head=document.createElement("div");
+    head.className="pline";
+    head.innerHTML="<div class='pname'><span>🚓</span><span class='who'>"+escapeHtml(p.name||"Player")+"</span></div>"+
+      "<div class='pill"+(lines?" win":"")+"'>"+(lines?(lines+" line"+(lines>1?"s":"")):"playing…")+"</div>";
+    block.appendChild(head);
+    const grid=document.createElement("div");
+    grid.className="grid mini";
+    for(let i=0;i<25;i++){
+      const d=document.createElement("div");
+      const free=(i===12);
+      d.className="cell"+(p.marks[i]?" marked":"")+(free?" free":"")+(cells.has(i)?" win":"");
+      d.innerHTML="<span>"+escapeHtml(p.card[i])+"</span>";
+      grid.appendChild(d);
+    }
+    block.appendChild(grid);
+    const meta=document.createElement("div");
+    meta.className="meta";
+    meta.textContent="updated "+(secs<3?"just now":secs+"s ago");
+    block.appendChild(meta);
+    list.appendChild(block);
+    // toast once when a player hits bingo
+    if(lines>0 && !seenBingo[id]){ seenBingo[id]=true; onPlayerBingo(p.name); }
+    if(lines===0) seenBingo[id]=false;
   }
-  document.getElementById("theirPill").textContent = lines? (lines+" line"+(lines>1?"s":"")) : "playing…";
-  document.getElementById("theirPill").className = "pill"+(lines?" win":"");
-  const secs=Math.max(0,Math.round((Date.now()-partner.t)/1000));
-  upd.textContent = "updated "+(secs<3?"just now":secs+"s ago");
-  // partner bingo notify
-  if(lines>0 && !partnerSeenBingo){ partnerSeenBingo=true; onPartnerBingo(); }
-  if(lines===0) partnerSeenBingo=false;
 }
 
 function toggle(i){
@@ -432,29 +458,25 @@ function schedulePublish(){
 }
 function handleIncoming(b){
   if(!b || b.id===ME || b.room!==ROOM) return;         // ignore self / other rooms
-  if(b.kind==="hello"){ publish("state"); return; }     // partner joined -> resend
-  if(!Array.isArray(b.card) || b.card.length!==25) return;
-  partner={ name:b.name, card:b.card, marks:b.marks, bingo:!!b.bingo, t:Date.now() };
-  // badge if on my-card tab
-  if(document.getElementById("viewTheirs").classList.contains("hidden")){
-    document.getElementById("theirBadge").classList.remove("hidden");
-  }
-  renderTheirs();
+  if(b.kind==="hello"){ publish("state"); return; }     // someone joined -> resend
+  if(!Array.isArray(b.card) || b.card.length!==25 || !Array.isArray(b.marks)) return;
+  players[b.id]={ name:b.name, card:b.card, marks:b.marks, bingo:!!b.bingo, t:Date.now() };
+  renderOthers();
 }
 
 /* ---------- celebration ---------- */
-function celebrate(mine){
+function celebrate(){
   const b=document.getElementById("banner");
-  document.getElementById("bwinEm").textContent = mine?"🎉":"📺";
-  document.getElementById("bwinTitle").textContent = mine?"BINGO!":(partner&&partner.name?partner.name:"They")+" got BINGO";
-  document.getElementById("bwinSub").textContent = mine?"You completed a full line!":"They just completed a line — better catch up!";
+  document.getElementById("bwinEm").textContent="🎉";
+  document.getElementById("bwinTitle").textContent="BINGO!";
+  document.getElementById("bwinSub").textContent="You completed a full line!";
   b.classList.remove("hidden");
   fireConfetti();
-  if(mine){ publish("state"); }
+  publish("state");
   if(navigator.vibrate){ try{navigator.vibrate([40,60,40,60,120]);}catch(e){} }
 }
-function onPartnerBingo(){
-  showToast((partner&&partner.name?partner.name:"Your partner")+" got BINGO! 📺");
+function onPlayerBingo(name){
+  showToast((name||"A player")+" got BINGO! 🎉");
   fireConfetti();
   if(navigator.vibrate){ try{navigator.vibrate([30,50,30]);}catch(e){} }
 }
@@ -506,7 +528,7 @@ function startGame(){
   document.getElementById("roomEcho").textContent=ROOM;
   document.getElementById("setup").classList.add("hidden");
   document.getElementById("game").classList.remove("hidden");
-  renderMine(); renderTheirs();
+  renderMine(); renderOthers();
   connect();
 }
 function shake(id){
@@ -523,7 +545,7 @@ function leave(){
   document.getElementById("game").classList.add("hidden");
   document.getElementById("setup").classList.remove("hidden");
   setStatus("");
-  partner=null; document.getElementById("theirBadge").classList.add("hidden");
+  players={}; seenBingo={}; document.getElementById("theirBadge").classList.add("hidden");
 }
 
 /* ---------- tabs ---------- */
@@ -533,7 +555,7 @@ function showTab(which){
   document.getElementById("tabTheirs").classList.toggle("active",!mine);
   document.getElementById("viewMine").classList.toggle("hidden",!mine);
   document.getElementById("viewTheirs").classList.toggle("hidden",mine);
-  if(!mine){ document.getElementById("theirBadge").classList.add("hidden"); renderTheirs(); }
+  if(!mine){ document.getElementById("theirBadge").classList.add("hidden"); renderOthers(); }
 }
 
 /* ---------- wire up ---------- */
@@ -553,8 +575,8 @@ document.getElementById("useSuggest").addEventListener("click",()=>{ document.ge
   setStatus("");
 })();
 
-// keep "updated Xs ago" fresh
-setInterval(()=>{ if(partner && !document.getElementById("viewTheirs").classList.contains("hidden")) renderTheirs(); }, 5000);
+// keep "updated Xs ago" fresh + prune players who left + refresh the tab badge
+setInterval(()=>{ if(ROOM) renderOthers(); }, 5000);
 // republish when app comes back to foreground
 document.addEventListener("visibilitychange",()=>{ if(!document.hidden && ROOM){ if(!pollActive){ connect(); } else { publish("state"); clearTimeout(pollTimer); poll(); } } });
 </script>
