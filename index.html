@@ -81,7 +81,7 @@
   .grid{display:grid; grid-template-columns:repeat(5,1fr); gap:7px;}
   .cell{position:relative; aspect-ratio:1/1; background:var(--panel2); border:1px solid var(--line); border-radius:11px;
     display:flex; align-items:center; justify-content:center; text-align:center; padding:5px;
-    font-size:10px; line-height:1.15; font-weight:600; color:var(--ink); cursor:pointer; overflow:hidden; transition:transform .08s, background .15s;}
+    font-size:10.5px; line-height:1.12; font-weight:600; color:var(--ink); cursor:pointer; overflow:hidden; overflow-wrap:break-word; -webkit-hyphens:auto; hyphens:auto; transition:transform .08s, background .15s;}
   .cell span{display:block;}
   .cell.marked{background:linear-gradient(180deg,var(--blue) 0%, var(--blue2) 100%); border-color:transparent; color:#fff;}
   .cell.marked::after{content:""; position:absolute; inset:0; background:
@@ -93,13 +93,15 @@
   @keyframes winflash{from{box-shadow:0 0 0 0 rgba(255,207,74,0);}to{box-shadow:0 0 0 3px rgba(255,207,74,.85);}}
   .cell .chk{position:absolute; top:3px; right:4px; font-size:11px; opacity:.9;}
 
-  /* Mini (partner) grid */
-  .mini .cell{font-size:8.5px; border-radius:9px; cursor:default; padding:3px;}
+  /* Mini (other players') progress grids — compact, mark-only */
+  .mini{max-width:220px; gap:5px; margin-top:2px;}
+  .mini .cell{font-size:0; padding:0; border-radius:6px; cursor:default;}
+  .mini .cell span{display:none;}
   .mini .cell.marked{background:linear-gradient(180deg,var(--green) 0%, #1c8f6f 100%);}
-  .mini .cell.free{color:var(--gold);}
-  .playerblock{padding-top:14px; margin-top:14px; border-top:1px solid var(--line);}
+  .mini .cell.free{background:linear-gradient(180deg,var(--green) 0%, #1c8f6f 100%);}
+  .playerblock{padding-top:12px; margin-top:12px; border-top:1px solid var(--line);}
   .playerblock:first-child{padding-top:2px; margin-top:0; border-top:none;}
-  .playerblock .meta{text-align:left;}
+  .playerblock .meta{text-align:left; margin-top:7px;}
 
   .waiting{text-align:center; color:var(--muted); padding:34px 16px; font-size:14px; line-height:1.6;}
   .waiting .big{font-size:40px; margin-bottom:10px;}
@@ -346,10 +348,12 @@ function renderOthers(){
     const block=document.createElement("div");
     block.className="playerblock";
     const secs=Math.max(0,Math.round((now-p.t)/1000));
+    const marked=p.marks.reduce((a,v)=>a+(v?1:0),0)-1; // exclude the FREE square
+    const pillTxt=lines? (lines+" line"+(lines>1?"s":"")) : (marked>0? marked+" marked" : "playing…");
     const head=document.createElement("div");
     head.className="pline";
     head.innerHTML="<div class='pname'><span>🚓</span><span class='who'>"+escapeHtml(p.name||"Player")+"</span></div>"+
-      "<div class='pill"+(lines?" win":"")+"'>"+(lines?(lines+" line"+(lines>1?"s":"")):"playing…")+"</div>";
+      "<div class='pill"+(lines?" win":"")+"'>"+pillTxt+"</div>";
     block.appendChild(head);
     const grid=document.createElement("div");
     grid.className="grid mini";
